@@ -1,0 +1,8 @@
+temp*
+.idea/
+.DS_Store
+*results*.json
+*results*.xlsx
+.pytest_cache
+__pycache__
+results/
