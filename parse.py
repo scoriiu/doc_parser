@@ -270,13 +270,13 @@ if __name__ == '__main__':
     results = compute_results(args.pdf_dir, keywords)
 
     pdf_dir = args.pdf_dir[:-1] if args.pdf_dir[-1] in ['\\', '/'] else args.pdf_dir
-    export_to_json(results, f'{results_dir}/results_{pdf_dir}.json')
+    export_to_json(results, os.path.join(results_dir, f'results_{pdf_dir}.json'))
 
     if args.verbose:
         log_results(results)
 
     if args.excel:
-        export_to_excel(results, keywords, f'{results_dir}/results_{pdf_dir}.xlsx')
+        export_to_excel(results, keywords, os.path.join(results_dir, f'results_{pdf_dir}.xlsx'))
 
     if args.html:
         export_to_html(results, keywords)
