@@ -16,35 +16,35 @@ from utils.utils import regex_ignore_case
 
 global_keywords = ['Country']
 
-introduction_title_pattern = f'{regex_ignore_case("introduction")}[1-9\\s]*[A-Z]'
-methods_title_pattern = f'({regex_ignore_case("methods")}|{regex_ignore_case("patients")}|{regex_ignore_case("materials")})[1-9\\s]*[A-Z]'
-discussion_title_pattern = f'{regex_ignore_case("discussion")}[1-9\\s]*[A-Z]'
-references_title_pattern = f'{regex_ignore_case("references")}[1-9\\s]*[A-Z]'
+introduction_title_pattern = f'{regex_ignore_case("introduction")}[1-9\\s]*[1-9A-Z]'
+area_of_interest_start_pattern = f'({regex_ignore_case("methods")}|{regex_ignore_case("patients")}|{regex_ignore_case("materials")}*)[1-9\\s]*[1-9A-Z]'
+area_of_interest_end_pattern = f'({regex_ignore_case("discussion")}|{regex_ignore_case("references")})[1-9\\s]*[1-9A-Z]'
+study_date_pattern = r'(.{0,20})((19|20)\d{2})(.{0,25})((19|20)\d{2})(.{0,20})'
 pattern_nb_patients = \
     r'(.{50})(\d[\d,]*)([^\d%]{0,50}((?i)patients|cases|subjects|individuals))(.{30})'
 
 
 def convert_pdf_to_txt(path) -> str:
-    rsrcmgr = PDFResourceManager()
-    retstr = StringIO()
-    laparams = LAParams()
-    device = TextConverter(rsrcmgr, retstr, laparams=laparams)
+    rsrc_mgr = PDFResourceManager()
+    ret_str = StringIO()
+    la_params = LAParams()
+    device = TextConverter(rsrc_mgr, ret_str, laparams=la_params)
     fp = open(path, 'rb')
-    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    interpreter = PDFPageInterpreter(rsrc_mgr, device)
     password = ''
-    maxpages = 0
+    max_pages = 0
     caching = True
-    pagenos = set()
+    page_nos = set()
 
-    for page in PDFPage.get_pages(fp, pagenos, maxpages=maxpages, password=password, caching=caching,
-                                  check_extractable=True):
+    for page in PDFPage.get_pages(fp, page_nos, maxpages=max_pages, password=password,
+                                  caching=caching, check_extractable=True):
         interpreter.process_page(page)
 
-    text = retstr.getvalue()
+    text = ret_str.getvalue()
 
     fp.close()
     device.close()
-    retstr.close()
+    ret_str.close()
     return text
 
 
@@ -56,18 +56,17 @@ def log_processing_done(filename):
     print(log)
 
 
-def compute_search_pattern(text):
-    max_ix = 1e7
-    references_ix = re.search(references_title_pattern, text, re.IGNORECASE)
-    references_ix = references_ix.regs[0] if references_ix else max_ix
-    references_ix = references_ix[0] if type(references_ix) == tuple else references_ix
+def match_area_of_interest(text) -> (str, bool, (int, int)):
+    start_loc = re.search(area_of_interest_start_pattern, text)
+    start_loc = min(start_loc.regs, key=lambda l: l[0]) if start_loc else 1000
+    start_loc = start_loc[0] if type(start_loc) == tuple else start_loc
 
-    discussion_ix = re.search(discussion_title_pattern, text, re.IGNORECASE)
-    discussion_ix = discussion_ix.regs[0] if discussion_ix else max_ix
-    discussion_ix = discussion_ix[0] if type(discussion_ix) == tuple else discussion_ix
+    end_loc = re.search(area_of_interest_end_pattern, text)
+    end_loc = min(end_loc.regs, key=lambda l: l[1]) if end_loc else len(text) - 1000
+    end_loc = end_loc[1] if type(end_loc) == tuple else end_loc
 
-    end_pattern = references_title_pattern if references_ix < discussion_ix else discussion_title_pattern
-    return f'(?={methods_title_pattern})(.*?)(?={end_pattern})'
+    is_match = start_loc != 1000 and end_loc != len(text) - 1000
+    return text[start_loc:end_loc], is_match, (start_loc, end_loc)
 
 
 def parse_nb_patients(text) -> (int, str):
@@ -79,6 +78,18 @@ def parse_nb_patients(text) -> (int, str):
     return max_group[1], f'{max_group[1]}\n({"".join(max_group[:3]) + max_group[-1]})'
 
 
+def parse_study_year_range(text, optional_text=None) -> ((int, int), str):
+    m = re.findall(study_date_pattern, text, re.IGNORECASE)
+    if not m and optional_text:
+        m = re.findall(study_date_pattern, optional_text, re.IGNORECASE)
+
+    if not m:
+        return (0, 0), ''
+
+    year_range = int(m[0][1]), int(m[0][4])
+    return year_range, f'{m[0][1]}-{m[0][4]}\n({m[0][0] + m[0][1] + m[0][3] + m[0][4] + m[0][6]})'
+
+
 def compute_results(pdf_dir, keywords):
     results = {}
     pdf_files = glob.glob(f'{pdf_dir}/*.pdf')
@@ -88,23 +99,19 @@ def compute_results(pdf_dir, keywords):
         text = convert_pdf_to_txt(pdf_file)
         text = text.replace('\n', '').replace('\r', '')
 
-        pattern = compute_search_pattern(text)
-        text_constrained = text
-        m = re.findall(pattern, text)
-        if not m:
-            area_of_interest_matched = False
-        else:
-            area_of_interest_matched = True
-            text_constrained = m[0][1]
-
-        keywords_search_results = {'#Patients': parse_nb_patients(text)[1]}
+        text_of_interest, text_of_interest_matched, loc_range = match_area_of_interest(text)
+        study_year_range = parse_study_year_range(text[loc_range[0]:loc_range[0] + 1000], text[:2000])[1]
+        keywords_search_results = {
+            '#Patients': parse_nb_patients(text)[1],
+            'Period Of Study': study_year_range
+        }
         for k_name, v_keywords in keywords.items():
-            _text = text if k_name in global_keywords else text_constrained
+            _text = text if k_name in global_keywords else text_of_interest
             flags = 0 if k_name == 'Country' else re.IGNORECASE
             matches = [k for k in v_keywords if re.search(f'\\b{k}\\b', _text, flags)]
             keywords_search_results[k_name] = matches
 
-        keywords_search_results['AreaOfInterestMatched'] = area_of_interest_matched
+        keywords_search_results['AreaOfInterestMatched'] = text_of_interest_matched
         results[pdf_name] = keywords_search_results
 
         log_processing_done(pdf_name)
@@ -132,7 +139,7 @@ def export_to_excel(results, keywords, output):
     bold_style = workbook.add_format(header_format)
     warn_style = workbook.add_format(warn_format)
 
-    headers = ['Document', '#Patients', *keywords, ]
+    headers = ['Document', '#Patients', 'Period Of Study', *keywords, ]
     for ix, header in enumerate(headers):
         worksheet.write(0, ix, header, bold_style)
 
@@ -142,7 +149,7 @@ def export_to_excel(results, keywords, output):
         doc_name += ' (*)' if not v['AreaOfInterestMatched'] else ''
         row = [doc_name]
         for _k, _v in v.items():
-            if _k not in [*keywords.keys(), '#Patients']:
+            if _k not in [*keywords.keys(), '#Patients', 'Period Of Study']:
                 continue
 
             cell = ', '.join(_v) if isinstance(_v, list) else _v
@@ -162,14 +169,14 @@ def export_to_html(results, keywords):
     header_color = 'grey'
     row_even_color = 'lightgrey'
     row_odd_color = 'white'
-    headers = ['<b>Document<b>', '<b>#Patients<b>'] + [f'<b>{k}<b>' for k in keywords]
+    headers = ['<b>Document<b>', '<b>#Patients<b>', '<b>Period Of Study<b>'] + [f'<b>{k}<b>' for k in keywords]
     cells = []
     for k, v in results.items():
         doc_name = k
         doc_name += ' (*)' if not v['AreaOfInterestMatched'] else ''
         row = [doc_name]
         for _k, _v in v.items():
-            if _k not in [*keywords.keys(), '#Patients']:
+            if _k not in [*keywords.keys(), '#Patients', 'Period Of Study']:
                 continue
 
             cell = ', '.join(_v) if isinstance(_v, list) else _v
