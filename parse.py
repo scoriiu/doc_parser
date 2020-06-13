@@ -50,6 +50,9 @@ def parse_args():
 if __name__ == '__main__':
     script_dir = os.path.dirname(os.path.realpath(__file__))
     results_dir = os.path.join(script_dir, 'results')
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+
     os.makedirs(script_dir, exist_ok=True)
     keywords = open(f'{script_dir}/keywords.json')
     keywords = json.load(keywords)
