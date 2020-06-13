@@ -31,13 +31,13 @@ def convert_pdf_to_txt(path) -> str:
     device = TextConverter(rsrc_mgr, ret_str, laparams=la_params)
     fp = open(path, 'rb')
     interpreter = PDFPageInterpreter(rsrc_mgr, device)
-    password = ''
+    password = b''
     max_pages = 0
     caching = True
     page_nos = set()
 
     for page in PDFPage.get_pages(fp, page_nos, maxpages=max_pages, password=password,
-                                  caching=caching, check_extractable=True):
+                                  caching=caching, check_extractable=False):
         interpreter.process_page(page)
 
     text = ret_str.getvalue()
