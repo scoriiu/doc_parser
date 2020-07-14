@@ -50,8 +50,7 @@ def convert_pdf_to_txt(path) -> str:
 
 def log_processing_done(filename):
     log = f'{filename} '
-    while len(log) < 110:
-        log += '.'
+    log += (110 - len(log)) * '.'
     log += ' Done.'
     print(log)
 
